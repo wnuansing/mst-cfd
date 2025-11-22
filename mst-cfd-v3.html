@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bio-Scrubber CFD | Mixed Science Tech</title>
+    <style>
+        /* --- RESET & LAYOUT --- */
+        body {
+            margin: 0;
+            background-color: #121212; /* Dark Grey Background */
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: white;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        /* --- SIMULATION CANVAS (CENTERED) --- */
+        #sim-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1; /* Behind controls */
+        }
+
+        canvas {
+            height: 90vh; /* Tall Tank */
+            width: auto;  /* Maintain Aspect Ratio */
+            image-rendering: pixelated; 
+            border: 2px solid #444;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            background-color: #000; /* Start Black */
+        }
+
+        /* --- LABELS ON TANK --- */
+        .tank-label {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            pointer-events: none;
+            text-shadow: 0 1px 3px black;
+            z-index: 2;
+        }
+        #lbl-inlet { top: 6vh; background: rgba(0,0,0,0.6); border: 1px solid #555; }
+        #lbl-sump { bottom: 15vh; background: rgba(0,0,255,0.3); border: 1px solid #0000aa; }
+
+        /* --- CONTROL PANEL (FIXED RIGHT) --- */
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: rgba(30, 30, 30, 0.95);
+            backdrop-filter: blur(5px);
+            border: 1px solid #444;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 100; /* Always on top */
+        }
+
+        /* Typography */
+        h1 { font-size: 20px; margin: 0 0 5px 0; color: #00d2ff; font-weight: 700; }
+        h2 { font-size: 12px; margin: 0 0 20px 0; color: #aaa; font-weight: normal; }
+
+        /* Controls */
+        .control-group { margin-bottom: 15px; }
+        label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; color: #ccc; }
+        
+        input[type=range] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #00d2ff;
+        }
+
+        .val-disp { font-weight: bold; color: white; }
+
+        /* Button */
+        #btn-simulate {
+            width: 100%;
+            padding: 12px;
+            background: #d32f2f;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background 0.2s;
+        }
+        #btn-simulate:hover { background: #f44336; }
+        
+        /* Status */
+        #status-box {
+            margin-top: 15px;
+            padding: 10px;
+            background: #222;
+            border-left: 4px solid gray;
+            font-size: 12px;
+            text-align: center;
+            line-height: 1.4;
+        }
+        .st-ok { border-color: #00ff00 !important; color: #ccffcc; }
+        .st-warn { border-color: #ffa500 !important; color: #ffedcc; }
+        .st-crit { border-color: #ff0000 !important; color: #ffcccc; }
+
+        /* Legend */
+        #legend {
+            margin-top: 15px;
+            height: 6px;
+            background: linear-gradient(to right, #000033, #0044ff, #00ffff, #00ff00, #ffff00, #ff0000);
+            border-radius: 3px;
+        }
+        .leg-txt { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-top: 2px; }
+    </style>
+</head>
+<body>
+
+    <!-- Simulation Area -->
+    <div id="sim-container">
+        <canvas id="simCanvas"></canvas>
+        <div id="lbl-inlet" class="tank-label">▼ INLET ▼</div>
+        <div id="lbl-sump" class="tank-label">SUMP ZONE</div>
+    </div>
+
+    <!-- Control Panel -->
+    <div id="controls">
+        <h1>Bio-Scrubber CFD</h1>
+        <h2>Mixed Science Tech | H2S Analysis</h2>
+
+        <div class="control-group">
+            <label>Velocity <span class="val-disp"><span id="d-flow">0.018</span> m/s</span></label>
+            <input type="range" id="s-flow" min="0.005" max="0.04" step="0.001" value="0.018">
+            <div style="text-align:right; font-size:11px; color:#00d2ff; margin-top:2px;">
+                <span id="d-calc">25.00</span> Nm³/h
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>H2S Load <span class="val-disp"><span id="d-h2s">25,000</span> ppm</span></label>
+            <input type="range" id="s-h2s" min="1000" max="40000" step="1000" value="25000">
+        </div>
+
+        <div class="control-group">
+            <label>Temp <span class="val-disp"><span id="d-temp">30</span> °C</span></label>
+            <input type="range" id="s-temp" min="20" max="60" step="1" value="30">
+        </div>
+
+        <div class="control-group">
+            <label>Humidity <span class="val-disp"><span id="d-humid">80</span> %</span></label>
+            <input type="range" id="s-humid" min="0" max="100" step="10" value="80">
+        </div>
+
+        <button id="btn-simulate">RUN SIMULATION</button>
+
+        <div id="legend"></div>
+        <div class="leg-txt"><span>0.0 m/s</span><span>0.03 m/s</span></div>
+
+        <div id="status-box" class="st-ok">
+            SYSTEM READY<br>Press Run to Start
+        </div>
+    </div>
+
+<script>
+// --- 1. SETUP ---
+const nx = 150; 
+const ny = 450; // Aspect ratio optimized for vertical tank
+const size = nx * ny;
+
+const canvas = document.getElementById('simCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = nx;
+canvas.height = ny;
+
+// Image Buffer
+const imgData = ctx.createImageData(nx, ny);
+const buf = new Uint32Array(imgData.data.buffer);
+
+// Arrays
+let f = new Float32Array(9 * size);
+let f_new = new Float32Array(9 * size);
+let barrier = new Uint8Array(size).fill(0); 
+let ux = new Float32Array(size).fill(0.0);
+let uy = new Float32Array(size).fill(0.0);
+
+// LBM Constants
+const w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const cx = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const cy = [0, 0, 1, 0, -1, 1, 1, -1, -1];
+const opp = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+// State
+let isRunning = false;
+let currentFlow = 0.018;
+let currentTau = 0.6;
+
+// --- 2. INITIALIZATION ---
+function initGeometry() {
+    // Clear barrier array first
+    barrier.fill(0);
+
+    // Hexa-Cell Params
+    const topY = 20;
+    const botY = Math.floor(ny * 0.7);
+    const period = 25;
+    const thick = 6;
+
+    for (let y = 0; y < ny; y++) {
+        for (let x = 0; x < nx; x++) {
+            let idx = y * nx + x;
+
+            // 1. Tank Walls (Left/Right)
+            if (x === 0 || x === nx - 1) {
+                barrier[idx] = 1;
+                continue;
+            }
+
+            // 2. Hexa-Cell Packing Zone
+            if (y >= topY && y < botY) {
+                // Vertical Walls
+                if ((x % period) < thick) {
+                    barrier[idx] = 1;
+                }
+                // Horizontal Interruptions (Baffles)
+                // Every 60 pixels, force a gap (Fluid)
+                if ((y - topY) % 60 < 3) {
+                    barrier[idx] = 0; 
+                }
+                // Staggered Blocks
+                else if ((y - topY) % 120 === 0 && x > nx*0.25 && x < nx*0.75) {
+                    barrier[idx] = 1;
+                }
+            }
+            
+            // 3. Inlet/Outlet (Top/Bottom) - Ensure Clear
+            if (y < 10 || y > ny - 10) {
+                barrier[idx] = 0;
+            }
+        }
+    }
+
+    // Initialize F to Equilibrium
+    for (let i = 0; i < size; i++) {
+        if (!barrier[i]) {
+            for (let k = 0; k < 9; k++) f[k*size + i] = w[k];
+        }
+    }
+}
+
+// --- 3. PHYSICS ---
+function step() {
+    // Collision & Streaming combined logic for speed
+    // But separate loops for correctness in JS structure
+    
+    // A. Collision
+    for (let i = 0; i < size; i++) {
+        if (barrier[i]) continue;
+
+        let r = 0, u_x = 0, u_y = 0;
+        // Unrolled moments
+        for(let k=0; k<9; k++) {
+            let val = f[k*size+i];
+            r += val;
+            u_x += val*cx[k];
+            u_y += val*cy[k];
+        }
+        u_x /= r; u_y /= r;
+        ux[i] = u_x; uy[i] = u_y; // Store for drawing
+
+        let usq = u_x*u_x + u_y*u_y;
+        for(let k=0; k<9; k++) {
+            let cu = 3*(cx[k]*u_x + cy[k]*u_y);
+            let feq = r * w[k] * (1 + cu + 0.5*cu*cu - 1.5*usq);
+            f[k*size+i] += (feq - f[k*size+i]) / currentTau;
+        }
+    }
+
+    // B. Streaming
+    for (let y = 0; y < ny; y++) {
+        for (let x = 0; x < nx; x++) {
+            let idx = y * nx + x;
+            if (barrier[idx]) continue;
+
+            for(let k=0; k<9; k++) {
+                let nx_x = x + cx[k];
+                let nx_y = y + cy[k];
+
+                if (nx_x >= 0 && nx_x < nx && nx_y >= 0 && nx_y < ny) {
+                    let n_idx = nx_y * nx + nx_x;
+                    if (barrier[n_idx]) {
+                        f_new[opp[k]*size + idx] = f[k*size+idx]; // Bounce
+                    } else {
+                        f_new[k*size + n_idx] = f[k*size+idx]; // Stream
+                    }
+                }
+            }
+        }
+    }
+
+    // C. Inlet (Top)
+    for(let x=1; x<nx-1; x++) {
+        if(!barrier[x]) {
+            let r=1.0, vx=0, vy=currentFlow; 
+            let usq = vy*vy;
+            for(let k=0; k<9; k++) {
+                let cu = 3*(cx[k]*vx + cy[k]*vy);
+                f_new[k*size+x] = r * w[k] * (1 + cu + 0.5*cu*cu - 1.5*usq);
+            }
+        }
+    }
+    
+    // D. Outlet (Bottom) - Copy
+    let row1 = (ny-1)*nx;
+    let row2 = (ny-2)*nx;
+    for(let x=1; x<nx-1; x++) {
+        for(let k=0; k<9; k++) f_new[k*size + row1 + x] = f_new[k*size + row2 + x];
+    }
+
+    // Swap
+    let temp = f; f = f_new; f_new = temp;
+}
+
+// --- 4. RENDER ---
+function draw() {
+    for (let i = 0; i < size; i++) {
+        if (barrier[i]) {
+            // Solid = Orange (0xFF008CFF) -> ABGR
+            buf[i] = (255<<24) | (0<<16) | (140<<8) | 255;
+        } else {
+            // Fluid
+            let val = Math.sqrt(ux[i]*ux[i] + uy[i]*uy[i]);
+            let s = val / 0.03; // Scale
+            if(s>1) s=1;
+
+            // Jet Map Manual
+            let r=0, g=0, b=0;
+            if(s<0.25) { r=0; g=Math.floor(4*s*255); b=255; }
+            else if(s<0.5) { r=0; g=255; b=Math.floor(255-4*(s-0.25)*255); }
+            else if(s<0.75) { r=Math.floor(4*(s-0.5)*255); g=255; b=0; }
+            else { r=255; g=Math.floor(255-4*(s-0.75)*255); b=0; }
+
+            buf[i] = (255<<24) | (b<<16) | (g<<8) | r;
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
+}
+
+// --- 5. UI LOGIC ---
+const s_flow = document.getElementById('s-flow');
+const s_h2s = document.getElementById('s-h2s');
+const s_temp = document.getElementById('s-temp');
+const s_humid = document.getElementById('s-humid');
+const statusBox = document.getElementById('status-box');
+
+const TANK_AREA = Math.PI * Math.pow(0.35, 2);
+
+function updateReadings() {
+    let flow = parseFloat(s_flow.value);
+    let h2s = parseInt(s_h2s.value);
+    let rate = flow * TANK_AREA * 3600;
+
+    document.getElementById('d-flow').innerText = flow.toFixed(3);
+    document.getElementById('d-h2s').innerText = h2s.toLocaleString();
+    document.getElementById('d-temp').innerText = s_temp.value;
+    document.getElementById('d-humid').innerText = s_humid.value;
+    document.getElementById('d-calc').innerText = rate.toFixed(2);
+    
+    statusBox.innerHTML = "Settings Changed.<br>Press Run to Update.";
+    statusBox.className = "st-ok";
+}
+
+[s_flow, s_h2s, s_temp, s_humid].forEach(e => e.addEventListener('input', updateReadings));
+
+document.getElementById('btn-simulate').addEventListener('click', () => {
+    // Set Physics
+    currentFlow = parseFloat(s_flow.value);
+    let temp = parseInt(s_temp.value);
+    currentTau = 0.6 + (temp - 20)*(0.3/40);
+    
+    // Check Safety
+    let rate = currentFlow * TANK_AREA * 3600;
+    let load = rate * s_h2s.value;
+    let limit = 25 * 25000;
+    
+    if (load > limit*1.2) {
+        statusBox.innerHTML = "CRITICAL ALERT<br>Retention Time Low!";
+        statusBox.className = "st-crit";
+    } else if (load > limit) {
+        statusBox.innerHTML = "WARNING<br>Efficiency Drop";
+        statusBox.className = "st-warn";
+    } else {
+        statusBox.innerHTML = "SYSTEM OPTIMAL<br>Hexa-Cell Active";
+        statusBox.className = "st-ok";
+    }
+    
+    if (!isRunning) {
+        isRunning = true;
+        animate();
+    }
+});
+
+function animate() {
+    if (isRunning) {
+        for(let k=0; k<6; k++) step();
+        draw();
+        requestAnimationFrame(animate);
+    }
+}
+
+// Start
+initGeometry();
+draw();
+
+</script>
+</body>
+</html>
